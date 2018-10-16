@@ -4,44 +4,11 @@ import os.path as osp
 
 import chainer
 import chainer.functions as F
-import chainer.links as L
 from chainer.links.model.vision.resnet import ResNet101Layers
 from chainer.links.model.vision.resnet import ResNet50Layers
-
 import fcn
 
-from .. import links
-
-
-def _get_affine_from_bn(bn):
-    channels = bn.gamma.size
-    bn_mean = bn.avg_mean
-    bn_var = bn.avg_var
-    scale = bn.gamma.data
-    bias = bn.beta.data
-    xp = chainer.cuda.get_array_module(bn_var)
-    std = xp.sqrt(bn_var + 1e-5)
-    new_scale = scale / std
-    new_bias = bias - bn_mean * new_scale
-    affine = links.AffineChannel2D(channels)
-    affine.W.data[:] = new_scale[:]
-    affine.b.data[:] = new_bias[:]
-    return affine
-
-
-def _convert_bn_to_affine(chain):
-    for name, link in chain.namedlinks():
-        if not isinstance(link, L.BatchNormalization):
-            continue
-        for key in name.split('/')[:-1]:
-            if key == '':
-                parent = chain
-            else:
-                parent = getattr(parent, key)
-        key = name.split('/')[-1]
-        delattr(parent, key)
-        link2 = _get_affine_from_bn(link)
-        parent.add_link(key, link2)
+from .batch_normalization_to_affine import batch_normalization_to_affine_chain
 
 
 class ResNetExtractorBase(object):
@@ -59,7 +26,7 @@ class ResNetExtractorBase(object):
             for remove_layer in remove_layers:
                 delattr(self, remove_layer)
                 setattr(self, remove_layer, None)  # for the functions property
-        _convert_bn_to_affine(self)
+        batch_normalization_to_affine_chain(self)
 
     @property
     def functions(self):

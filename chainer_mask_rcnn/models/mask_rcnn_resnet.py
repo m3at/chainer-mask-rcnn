@@ -20,9 +20,9 @@ import chainer.links as L
 from chainer.links.model.vision.resnet import BuildingBlock
 
 from .. import functions
+from .batch_normalization_to_affine import batch_normalization_to_affine_chain
 from .mask_rcnn import MaskRCNN
 from .region_proposal_network import RegionProposalNetwork
-from .resnet_extractor import _convert_bn_to_affine
 from .resnet_extractor import ResNet101Extractor
 from .resnet_extractor import ResNet50Extractor
 
@@ -131,6 +131,7 @@ class ResNetRoIHead(chainer.Chain):
             self.res5 = BuildingBlock(
                 3, 1024, 512, 2048, stride=roi_size // 7,
                 initialW=res_initialW)
+            batch_normalization_to_affine_chain(self.res5)
             self.cls_loc = L.Linear(2048, n_class * 4, initialW=loc_initialW)
             self.score = L.Linear(2048, n_class, initialW=score_initialW)
 
@@ -146,8 +147,6 @@ class ResNetRoIHead(chainer.Chain):
         self.roi_size = roi_size
         self.spatial_scale = spatial_scale
         self.pooling_func = pooling_func
-
-        _convert_bn_to_affine(self)
 
         if pretrained_model == 'auto':
             self._copy_imagenet_pretrained_resnet(n_layers)
