@@ -1,5 +1,7 @@
 # flake8: noqa
 
+from ._chainer import copyparams
+
 from ._shutil import git_hash
 
 from ._itertools import batch

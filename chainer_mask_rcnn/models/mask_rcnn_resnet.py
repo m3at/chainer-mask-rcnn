@@ -20,6 +20,7 @@ import chainer.links as L
 from chainer.links.model.vision.resnet import BuildingBlock
 
 from .. import functions
+from ..utils import copyparams
 from .batch_normalization_to_affine import batch_normalization_to_affine_chain
 from .mask_rcnn import MaskRCNN
 from .region_proposal_network import RegionProposalNetwork
@@ -161,8 +162,7 @@ class ResNetRoIHead(chainer.Chain):
             pretrained_model = ResNet101Extractor(pretrained_model='auto')
         else:
             raise ValueError
-        self.res5.copyparams(pretrained_model.res5)
-        _copy_persistent_chain(self.res5, pretrained_model.res5)
+        copyparams(self.res5, pretrained_model.res5)
 
     def __call__(self, x, rois, roi_indices, pred_bbox=True, pred_mask=True):
         roi_indices = roi_indices.astype(np.float32)
@@ -193,27 +193,3 @@ class ResNetRoIHead(chainer.Chain):
             roi_masks = self.mask(deconv6)
 
         return roi_cls_locs, roi_scores, roi_masks
-
-
-def _copy_persistent_link(dst, src):
-    for name in dst._persistent:
-        d = dst.__dict__[name]
-        s = src.__dict__[name]
-        if isinstance(d, np.ndarray):
-            d[:] = s
-        elif isinstance(d, int):
-            d = s
-        else:
-            raise ValueError
-
-
-def _copy_persistent_chain(dst, src):
-    _copy_persistent_link(dst, src)
-    for l in dst.children():
-        name = l.name
-        if (isinstance(dst.__dict__[name], chainer.Chain) and
-                isinstance(src.__dict__[name], chainer.Chain)):
-            _copy_persistent_chain(dst.__dict__[name], src.__dict__[name])
-        elif (isinstance(dst.__dict__[name], chainer.Link) and
-                isinstance(src.__dict__[name], chainer.Link)):
-            _copy_persistent_link(dst.__dict__[name], src.__dict__[name])
