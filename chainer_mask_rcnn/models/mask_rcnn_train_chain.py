@@ -113,9 +113,10 @@ class MaskRCNNTrainChain(chainer.Chain):
         batch_size, _, H, W = imgs.shape
         img_size = (H, W)
 
-        features = self.mask_rcnn.extractor(imgs)
+        res2, res4 = self.mask_rcnn.extractor(imgs)
+        res2.unchain_backward()
         rpn_locs, rpn_scores, rois, roi_indices, anchor = self.mask_rcnn.rpn(
-            features, img_size, scales)
+            res4, img_size, scales)
 
         if any(len(b) == 0 for b in bboxes):
             return chainer.Variable(self.xp.array(0, dtype=np.float32))
@@ -148,7 +149,7 @@ class MaskRCNNTrainChain(chainer.Chain):
         gt_roi_masks = self.xp.concatenate(gt_roi_masks, axis=0)
 
         roi_cls_locs, roi_scores, roi_masks = self.mask_rcnn.head(
-            features, sample_rois, sample_roi_indices)
+            res4, sample_rois, sample_roi_indices)
 
         # RPN losses
         gt_rpn_locs = []

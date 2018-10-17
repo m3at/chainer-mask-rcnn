@@ -11,21 +11,19 @@
 # https://github.com/chainer/chainercv
 # --------------------------------------------------------
 
-import numpy as np
+import functools
 
 import chainer
 import chainer.functions as F
 import chainer.links as L
-
-from chainer.links.model.vision.resnet import BuildingBlock
+import chainercv
+import numpy as np
 
 from .. import functions
 from ..utils import copyparams
 from .batch_normalization_to_affine import batch_normalization_to_affine_chain
 from .mask_rcnn import MaskRCNN
 from .region_proposal_network import RegionProposalNetwork
-from .resnet_extractor import ResNet101Extractor
-from .resnet_extractor import ResNet50Extractor
 
 
 class MaskRCNNResNet(MaskRCNN):
@@ -66,18 +64,32 @@ class MaskRCNNResNet(MaskRCNN):
         if res_initialW is None and pretrained_model:
             res_initialW = chainer.initializers.constant.Zero()
 
-        if n_layers == 50:
-            extractor = ResNet50Extractor(
-                pretrained_model=None if pretrained_model else 'auto',
-                remove_layers=['res5', 'fc6'],
-            )
-        elif n_layers == 101:
-            extractor = ResNet101Extractor(
-                pretrained_model=None if pretrained_model else 'auto',
-                remove_layers=['res5', 'fc6'],
-            )
+        if pretrained_model:
+            kwargs = dict(n_class=1)
         else:
-            raise ValueError
+            kwargs = dict(pretrained_model='imagenet')
+        cls = getattr(chainercv.links, 'ResNet{:d}'.format(n_layers))
+        assert isinstance(mean, tuple) and len(mean) == 3
+        extractor = cls(
+            arch='he', mean=np.array(mean)[:, None, None], **kwargs
+        )
+        extractor.pool1 = functools.partial(
+            F.max_pooling_2d, ksize=3, stride=2, pad=1
+        )
+
+        res5 = chainercv.links.model.resnet.ResBlock(
+            n_layer=3,
+            in_channels=1024,
+            mid_channels=512,
+            out_channels=2048,
+            stride=roi_size // 7,
+            initialW=res_initialW,
+            stride_first=True,
+        )
+        copyparams(res5, extractor.res5)
+
+        extractor.pick = ('res2', 'res4')
+        extractor.remove_unused()
 
         rpn = RegionProposalNetwork(
             1024, rpn_hidden,
@@ -88,11 +100,10 @@ class MaskRCNNResNet(MaskRCNN):
             proposal_creator_params=proposal_creator_params,
         )
         head = ResNetRoIHead(
-            n_layers=n_layers,
+            res5=res5,
             n_class=n_fg_class + 1,
             roi_size=roi_size,
             spatial_scale=1. / self.feat_stride,
-            pretrained_model=None if pretrained_model else 'auto',
             res_initialW=res_initialW,
             loc_initialW=loc_initialW,
             score_initialW=score_initialW,
@@ -100,18 +111,15 @@ class MaskRCNNResNet(MaskRCNN):
             pooling_func=pooling_func,
         )
 
-        if len(mean) != 3:
-            raise ValueError('The mean must be tuple of RGB values.')
-        mean = np.asarray(mean, dtype=np.float32)[:, None, None]
-
         super(MaskRCNNResNet, self).__init__(
             extractor,
             rpn,
             head,
-            mean=mean,
             min_size=min_size,
             max_size=max_size
         )
+
+        batch_normalization_to_affine_chain(self)
 
         if pretrained_model:
             chainer.serializers.load_npz(pretrained_model, self)
@@ -121,18 +129,14 @@ class ResNetRoIHead(chainer.Chain):
 
     mask_size = 14  # Size of the predicted mask.
 
-    def __init__(self, n_layers, n_class, roi_size, spatial_scale,
-                 pretrained_model='auto',
+    def __init__(self, res5, n_class, roi_size, spatial_scale,
                  res_initialW=None, loc_initialW=None, score_initialW=None,
                  mask_initialW=None, pooling_func=functions.roi_align_2d,
                  ):
         # n_class includes the background
         super(ResNetRoIHead, self).__init__()
         with self.init_scope():
-            self.res5 = BuildingBlock(
-                3, 1024, 512, 2048, stride=roi_size // 7,
-                initialW=res_initialW)
-            batch_normalization_to_affine_chain(self.res5)
+            self.res5 = res5
             self.cls_loc = L.Linear(2048, n_class * 4, initialW=loc_initialW)
             self.score = L.Linear(2048, n_class, initialW=score_initialW)
 
@@ -148,21 +152,6 @@ class ResNetRoIHead(chainer.Chain):
         self.roi_size = roi_size
         self.spatial_scale = spatial_scale
         self.pooling_func = pooling_func
-
-        if pretrained_model == 'auto':
-            self._copy_imagenet_pretrained_resnet(n_layers)
-        else:
-            assert pretrained_model is None, \
-                'Unsupported pretrained_model: {}'.format(pretrained_model)
-
-    def _copy_imagenet_pretrained_resnet(self, n_layers):
-        if n_layers == 50:
-            pretrained_model = ResNet50Extractor(pretrained_model='auto')
-        elif n_layers == 101:
-            pretrained_model = ResNet101Extractor(pretrained_model='auto')
-        else:
-            raise ValueError
-        copyparams(self.res5, pretrained_model.res5)
 
     def __call__(self, x, rois, roi_indices, pred_bbox=True, pred_mask=True):
         roi_indices = roi_indices.astype(np.float32)

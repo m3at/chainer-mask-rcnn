@@ -111,7 +111,6 @@ class MaskRCNN(chainer.Chain):
 
     def __init__(
             self, extractor, rpn, head,
-            mean,
             min_size=600,
             max_size=1000,
             loc_normalize_mean=(0., 0., 0., 0.),
@@ -123,7 +122,6 @@ class MaskRCNN(chainer.Chain):
             self.rpn = rpn
             self.head = head
 
-        self.mean = mean
         self.min_size = min_size
         self.max_size = max_size
         self.loc_normalize_mean = loc_normalize_mean
@@ -142,11 +140,12 @@ class MaskRCNN(chainer.Chain):
     def __call__(self, x, scales):
         img_size = x.shape[2:]
 
-        h = self.extractor(x)
+        res2, res4 = self.extractor(x)
+        res2.unchain_backward()
         rpn_locs, rpn_scores, rois, roi_indices, anchor =\
-            self.rpn(h, img_size, scales)
+            self.rpn(res4, img_size, scales)
         roi_cls_locs, roi_scores, roi_masks = self.head(
-            h, rois, roi_indices)
+            res4, rois, roi_indices)
         return roi_cls_locs, roi_scores, rois, roi_indices, roi_masks
 
     def prepare(self, imgs):
@@ -168,7 +167,7 @@ class MaskRCNN(chainer.Chain):
             img = cv2.resize(img, None, fx=scale, fy=scale)
             img = img.transpose(2, 0, 1)
 
-            img = (img - self.mean).astype(np.float32, copy=False)
+            img = (img - self.extractor.mean).astype(np.float32, copy=False)
 
             prepared_imgs.append(img)
             sizes.append((H, W))
@@ -312,12 +311,13 @@ class MaskRCNN(chainer.Chain):
         x = self.xp.asarray(x)
 
         with chainer.using_config('train', False), chainer.no_backprop_mode():
-            h = self.extractor(x)
+            res2, res4 = self.extractor(x)
+            res2.unchain_backward()
             rpn_locs, rpn_scores, rois, roi_indices, anchor = self.rpn(
-                h, x.shape[2:], scales,
+                res4, x.shape[2:], scales,
             )
             roi_cls_locs, roi_scores, _ = self.head(
-                h, rois, roi_indices, pred_mask=False,
+                res4, rois, roi_indices, pred_mask=False,
             )
 
         bboxes, labels, scores = self._to_bboxes(
@@ -331,7 +331,7 @@ class MaskRCNN(chainer.Chain):
             roi_indices.append(roi_index)
         roi_indices = np.concatenate(roi_indices, axis=0)
 
-        roi_masks = self._to_roi_masks(h, bboxes, roi_indices, scales)
+        roi_masks = self._to_roi_masks(res4, bboxes, roi_indices, scales)
         masks = self._to_masks(bboxes, labels, scores, roi_masks, sizes)
 
         return bboxes, masks, labels, scores

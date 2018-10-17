@@ -183,7 +183,6 @@ def train(args, train_data, test_data, evaluator_type):
         # ResNetExtractor.freeze_at is not enough to freeze params
         # since WeightDecay updates the param little by little.
         mask_rcnn.extractor.conv1.disable_update()
-        mask_rcnn.extractor.bn1.disable_update()
         mask_rcnn.extractor.res2.disable_update()
         for link in mask_rcnn.links():
             if isinstance(link, cmr.links.AffineChannel2D):
