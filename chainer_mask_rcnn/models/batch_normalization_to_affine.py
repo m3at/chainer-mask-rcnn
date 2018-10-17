@@ -21,7 +21,7 @@ def batch_normalization_to_affine_link(bn):
     return affine
 
 
-def batch_normalization_to_affine_chain(chain):
+def batch_normalization_to_affine(chain):
     assert isinstance(chain, chainer.Chain)
     for name, link in chain.namedlinks():
         if not isinstance(link, L.BatchNormalization):

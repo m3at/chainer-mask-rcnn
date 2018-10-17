@@ -21,7 +21,7 @@ import numpy as np
 
 from .. import functions
 from ..utils import copyparams
-from .batch_normalization_to_affine import batch_normalization_to_affine_chain
+from .batch_normalization_to_affine import batch_normalization_to_affine
 from .mask_rcnn import MaskRCNN
 from .region_proposal_network import RegionProposalNetwork
 
@@ -119,7 +119,7 @@ class MaskRCNNResNet(MaskRCNN):
             max_size=max_size
         )
 
-        batch_normalization_to_affine_chain(self)
+        batch_normalization_to_affine(self)
 
         if pretrained_model:
             chainer.serializers.load_npz(pretrained_model, self)
